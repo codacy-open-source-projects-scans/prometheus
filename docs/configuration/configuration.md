@@ -941,6 +941,9 @@ tls_config:
 # The host to use if the container is in host networking mode.
 [ host_networking_host: <string> | default = "localhost" ]
 
+# Match the first network if the container has multiple networks defined, thus avoiding collecting duplicate targets.
+[ match_first_network: <boolean> | default = true ]
+
 # Optional filters to limit the discovery process to a subset of available
 # resources.
 # The available filters are listed in the upstream documentation:
@@ -1229,6 +1232,7 @@ The following meta labels are available on targets during [relabeling](#relabel_
 * `__meta_ec2_ipv6_addresses`: comma separated list of IPv6 addresses assigned to the instance's network interfaces, if present
 * `__meta_ec2_owner_id`: the ID of the AWS account that owns the EC2 instance
 * `__meta_ec2_platform`: the Operating System platform, set to 'windows' on Windows servers, absent otherwise
+* `__meta_ec2_primary_ipv6_addresses`: comma separated list of the Primary IPv6 addresses of the instance, if present. The list is ordered based on the position of each corresponding network interface in the attachment order.
 * `__meta_ec2_primary_subnet_id`: the subnet ID of the primary network interface, if available
 * `__meta_ec2_private_dns_name`: the private DNS name of the instance, if available
 * `__meta_ec2_private_ip`: the private IP address of the instance, if present
@@ -1359,7 +1363,7 @@ interface.
 The following meta labels are available on targets during [relabeling](#relabel_config):
 
 * `__meta_openstack_address_pool`: the pool of the private IP.
-* `__meta_openstack_instance_flavor`: the flavor ID of the OpenStack instance.
+* `__meta_openstack_instance_flavor`: the flavor name of the OpenStack instance, or the flavor ID if the flavor name isn't available.
 * `__meta_openstack_instance_id`: the OpenStack instance ID.
 * `__meta_openstack_instance_image`: the ID of the image the OpenStack instance is using.
 * `__meta_openstack_instance_name`: the OpenStack instance name.
@@ -3571,6 +3575,17 @@ this functionality.
 # The URL of the endpoint to send samples to.
 url: <string>
 
+# protobuf message to use when writing to the remote write endpoint.
+#
+# * The `prometheus.WriteRequest` represents the message introduced in Remote Write 1.0, which
+# will be deprecated eventually.
+# * The `io.prometheus.write.v2.Request` was introduced in Remote Write 2.0 and replaces the former,
+# by improving efficiency and sending metadata, created timestamp and native histograms by default.
+#
+# Before changing this value, consult with your remote storage provider (or test) what message it supports.
+# Read more on https://prometheus.io/docs/specs/remote_write_spec_2_0/#io-prometheus-write-v2-request
+[ protobuf_message: <prometheus.WriteRequest | io.prometheus.write.v2.Request> | default = prometheus.WriteRequest ]
+
 # Timeout for requests to the remote write endpoint.
 [ remote_timeout: <duration> | default = 30s ]
 
@@ -3592,6 +3607,7 @@ write_relabel_configs:
 [ send_exemplars: <boolean> | default = false ]
 
 # Enables sending of native histograms, also known as sparse histograms, over remote write.
+# For the `io.prometheus.write.v2.Request` message, this option is noop (always true).
 [ send_native_histograms: <boolean> | default = false ]
 
 # Sets the `Authorization` header on every remote write request with the
@@ -3605,7 +3621,7 @@ basic_auth:
 # Optional `Authorization` header configuration.
 authorization:
   # Sets the authentication type.
-  [ type: <string> | default: Bearer ]
+  [ type: <string> | default = Bearer ]
   # Sets the credentials. It is mutually exclusive with
   # `credentials_file`.
   [ credentials: <secret> ]
@@ -3669,7 +3685,7 @@ tls_config:
 # contain port numbers.
 [ no_proxy: <string> ]
 # Use proxy URL indicated by environment variables (HTTP_PROXY, https_proxy, HTTPs_PROXY, https_proxy, and no_proxy)
-[ proxy_from_environment: <boolean> | default: false ]
+[ proxy_from_environment: <boolean> | default = false ]
 # Specifies headers to send to proxies during CONNECT requests.
 [ proxy_connect_header:
   [ <string>: [<secret>, ...] ] ]
@@ -3678,7 +3694,7 @@ tls_config:
 [ follow_redirects: <boolean> | default = true ]
 
 # Whether to enable HTTP2.
-[ enable_http2: <boolean> | default: true ]
+[ enable_http2: <boolean> | default = true ]
 
 # Configures the queue used to write to remote storage.
 queue_config:
@@ -3708,7 +3724,10 @@ queue_config:
   # which means that all samples are sent.
   [ sample_age_limit: <duration> | default = 0s ]
 
-# Configures the sending of series metadata to remote storage.
+# Configures the sending of series metadata to remote storage
+# if the `prometheus.WriteRequest` message was chosen. When
+# `io.prometheus.write.v2.Request` is used, metadata is always sent.
+#
 # Metadata configuration is subject to change at any point
 # or be removed in future releases.
 metadata_config:

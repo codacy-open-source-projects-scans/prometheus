@@ -455,7 +455,7 @@ func TestEndpoints(t *testing.T) {
 
 		remote := remote.NewStorage(promlog.New(&promlogConfig), prometheus.DefaultRegisterer, func() (int64, error) {
 			return 0, nil
-		}, dbDir, 1*time.Second, nil)
+		}, dbDir, 1*time.Second, nil, false)
 
 		err = remote.ApplyConfig(&config.Config{
 			RemoteReadConfigs: []*config.RemoteReadConfig{
@@ -2973,10 +2973,8 @@ func assertAPIError(t *testing.T, got *apiError, exp errorType) {
 	t.Helper()
 
 	if exp == errorNone {
-		//nolint:testifylint
 		require.Nil(t, got)
 	} else {
-		//nolint:testifylint
 		require.NotNil(t, got)
 		require.Equal(t, exp, got.typ, "(%q)", got)
 	}
