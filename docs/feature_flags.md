@@ -15,7 +15,7 @@ They may be enabled by default in future versions.
 
 `--enable-feature=exemplar-storage`
 
-[OpenMetrics](https://github.com/OpenObservability/OpenMetrics/blob/main/specification/OpenMetrics.md#exemplars) introduces the ability for scrape targets to add exemplars to certain metrics. Exemplars are references to data outside of the MetricSet. A common use case are IDs of program traces.
+[OpenMetrics](https://github.com/prometheus/OpenMetrics/blob/v1.0.0/specification/OpenMetrics.md#exemplars) introduces the ability for scrape targets to add exemplars to certain metrics. Exemplars are references to data outside of the MetricSet. A common use case are IDs of program traces.
 
 Exemplar storage is implemented as a fixed size circular buffer that stores exemplars in memory for all series. Enabling this feature will enable the storage of exemplars scraped by Prometheus. The config file block [storage](configuration/configuration.md#configuration-file)/[exemplars](configuration/configuration.md#exemplars) can be used to control the size of circular buffer by # of exemplars. An exemplar with just a `trace_id=<jaeger-trace-id>` uses roughly 100 bytes of memory via the in-memory exemplar storage. If the exemplar storage is enabled, we will also append the exemplars to WAL for local persistence (for WAL duration).
 
@@ -23,9 +23,8 @@ Exemplar storage is implemented as a fixed size circular buffer that stores exem
 
 `--enable-feature=memory-snapshot-on-shutdown`
 
-This takes the snapshot of the chunks that are in memory along with the series information when shutting down and stores
-it on disk. This will reduce the startup time since the memory state can be restored with this snapshot and m-mapped
-chunks without the need of WAL replay.
+This takes a snapshot of the chunks that are in memory along with the series information when shutting down and stores it on disk. This will reduce the startup time since the memory state can now be restored with this snapshot 
+and m-mapped chunks, while a WAL replay from disk is only needed for the parts of the WAL that are not part of the snapshot.
 
 ## Extra scrape metrics
 
@@ -47,20 +46,6 @@ statistics. Currently this is limited to totalQueryableSamples.
 
 When disabled in either the engine or the query, per-step statistics are not
 computed at all.
-
-## Auto GOMAXPROCS
-
-`--enable-feature=auto-gomaxprocs`
-
-When enabled, GOMAXPROCS variable is automatically set to match Linux container CPU quota.
-
-## Auto GOMEMLIMIT
-
-`--enable-feature=auto-gomemlimit`
-
-When enabled, the GOMEMLIMIT variable is automatically set to match the Linux container memory limit. If there is no container limit, or the process is running outside of containers, the system memory total is used.
-
-There is also an additional tuning flag, `--auto-gomemlimit.ratio`, which allows controlling how much of the memory is used for Prometheus. The remainder is reserved for memory outside the process. For example, kernel page cache. Page cache is important for Prometheus TSDB query performance. The default is `0.9`, which means 90% of the memory limit will be used for Prometheus.
 
 ## Native Histograms
 

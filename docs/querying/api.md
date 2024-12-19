@@ -433,18 +433,40 @@ URL query parameters:
   series from which to read the label values. Optional.
 - `limit=<number>`: Maximum number of returned series. Optional. 0 means disabled.
 
-
 The `data` section of the JSON response is a list of string label values.
 
-This example queries for all label values for the `job` label:
+This example queries for all label values for the `http_status_code` label:
 
 ```json
-$ curl http://localhost:9090/api/v1/label/job/values
+$ curl http://localhost:9090/api/v1/label/http_status_code/values
 {
    "status" : "success",
    "data" : [
-      "node",
-      "prometheus"
+      "200",
+      "504"
+   ]
+}
+```
+
+Label names can optionally be encoded using the Values Escaping method, and is necessary if a name includes the `/` character. To encode a name in this way:
+
+* Prepend the label with `U__`.
+* Letters, numbers, and colons appear as-is.
+* Convert single underscores to double underscores.
+* For all other characters, use the UTF-8 codepoint as a hex integer, surrounded
+  by underscores.  So ` ` becomes `_20_` and a `.` becomes `_2e_`.
+
+ More information about text escaping can be found in the original UTF-8 [Proposal document](https://github.com/prometheus/proposals/blob/main/proposals/2023-08-21-utf8.md#text-escaping).
+
+This example queries for all label values for the `http.status_code` label:
+
+```json
+$ curl http://localhost:9090/api/v1/label/U__http_2e_status_code/values
+{
+   "status" : "success",
+   "data" : [
+      "200",
+      "404"
    ]
 }
 ```
@@ -568,7 +590,7 @@ Instant vectors are returned as result type `vector`. The corresponding
 Each series could have the `"value"` key, or the `"histogram"` key, but not both.
 
 Series are not guaranteed to be returned in any particular order unless a function
-such as [`sort`](functions.md#sort) or [`sort_by_label`](functions.md#sort_by_label)`
+such as [`sort`](functions.md#sort) or [`sort_by_label`](functions.md#sort_by_label)
 is used.
 
 ### Scalars
@@ -905,7 +927,7 @@ curl -G http://localhost:9091/api/v1/targets/metadata \
 ```
 
 The following example returns metadata for all metrics for all targets with
-label `instance="127.0.0.1:9090`.
+label `instance="127.0.0.1:9090"`.
 
 ```json
 curl -G http://localhost:9091/api/v1/targets/metadata \
@@ -1190,9 +1212,11 @@ The following endpoint returns various cardinality statistics about the Promethe
 GET /api/v1/status/tsdb
 ```
 URL query parameters:
+
 - `limit=<number>`: Limit the number of returned items to a given number for each set of statistics. By default, 10 items are returned.
 
-The `data` section of the query result consists of
+The `data` section of the query result consists of:
+
 - **headStats**: This provides the following data about the head block of the TSDB:
   - **numSeries**: The number of series.
   - **chunkCount**: The number of chunks.
@@ -1268,13 +1292,13 @@ The following endpoint returns information about the WAL replay:
 GET /api/v1/status/walreplay
 ```
 
-**read**: The number of segments replayed so far.
-**total**: The total number segments needed to be replayed.
-**progress**: The progress of the replay (0 - 100%).
-**state**: The state of the replay. Possible states:
-- **waiting**: Waiting for the replay to start.
-- **in progress**: The replay is in progress.
-- **done**: The replay has finished.
+- **read**: The number of segments replayed so far.
+- **total**: The total number segments needed to be replayed.
+- **progress**: The progress of the replay (0 - 100%).
+- **state**: The state of the replay. Possible states:
+  - **waiting**: Waiting for the replay to start.
+  - **in progress**: The replay is in progress.
+  - **done**: The replay has finished.
 
 ```json
 $ curl http://localhost:9090/api/v1/status/walreplay

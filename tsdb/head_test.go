@@ -4732,7 +4732,7 @@ func TestOOOHistogramCounterResetHeaders(t *testing.T) {
 
 			// OOO histogram
 			for i := 1; i <= 5; i++ {
-				appendHistogram(100+int64(i), tsdbutil.GenerateTestHistogram(1000+i))
+				appendHistogram(100+int64(i), tsdbutil.GenerateTestHistogram(1000+int64(i)))
 			}
 			// Nothing mmapped yet.
 			checkOOOExpCounterResetHeader()
@@ -4820,7 +4820,7 @@ func TestOOOHistogramCounterResetHeaders(t *testing.T) {
 			appendHistogram(300, tsdbutil.SetHistogramCounterReset(tsdbutil.GenerateTestHistogram(3000)))
 
 			for i := 1; i <= 4; i++ {
-				appendHistogram(300+int64(i), tsdbutil.GenerateTestHistogram(3000+i))
+				appendHistogram(300+int64(i), tsdbutil.GenerateTestHistogram(3000+int64(i)))
 			}
 
 			// One mmapped chunk with (ts, val) [(300, 3000), (301, 3001), (302, 3002), (303, 3003), (350, 4000)].
@@ -6405,7 +6405,7 @@ func TestHeadAppender_AppendCT(t *testing.T) {
 			expectedSamples: []chunks.Sample{
 				sample{t: 1, h: &histogram.Histogram{}},
 				sample{t: 100, h: testHistogram},
-				sample{t: 101, h: &histogram.Histogram{CounterResetHint: histogram.CounterReset}},
+				sample{t: 101, h: &histogram.Histogram{CounterResetHint: histogram.UnknownCounterReset}},
 				sample{t: 102, h: testHistogram},
 			},
 		},
@@ -6418,7 +6418,7 @@ func TestHeadAppender_AppendCT(t *testing.T) {
 			expectedSamples: []chunks.Sample{
 				sample{t: 1, fh: &histogram.FloatHistogram{}},
 				sample{t: 100, fh: testFloatHistogram},
-				sample{t: 101, fh: &histogram.FloatHistogram{CounterResetHint: histogram.CounterReset}},
+				sample{t: 101, fh: &histogram.FloatHistogram{CounterResetHint: histogram.UnknownCounterReset}},
 				sample{t: 102, fh: testFloatHistogram},
 			},
 		},
