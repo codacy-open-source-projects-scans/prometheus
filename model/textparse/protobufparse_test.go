@@ -608,7 +608,7 @@ type: COUNTER
 metric: <
   counter: <
     value: 42
-    created_timestamp: <
+    start_timestamp: <
       seconds: 1625851153
       nanos: 146848499
     >
@@ -623,7 +623,7 @@ metric: <
   summary: <
     sample_count: 42
     sample_sum: 1.234
-    created_timestamp: <
+    start_timestamp: <
       seconds: 1625851153
       nanos: 146848499
     >
@@ -636,7 +636,7 @@ help: "A histogram with a created timestamp."
 type: HISTOGRAM
 metric: <
   histogram: <
-    created_timestamp: <
+    start_timestamp: <
       seconds: 1625851153
       nanos: 146848499
     >
@@ -653,7 +653,7 @@ help: "A gauge histogram with a created timestamp."
 type: GAUGE_HISTOGRAM
 metric: <
   histogram: <
-    created_timestamp: <
+    start_timestamp: <
       seconds: 1625851153
       nanos: 146848499
     >
@@ -5909,6 +5909,32 @@ func generateValidLabelName(r *rand.Rand) string {
 
 func generateValidMetricName(r *rand.Rand) string {
 	return generateString(r, validFirstRunes, validMetricNameRunes)
+}
+
+// TestProtobufParseSummaryNoQuantilesNoPanic is a regression test for a panic
+// when Next() is called without Series() on a summary with no quantiles.
+func TestProtobufParseSummaryNoQuantilesNoPanic(t *testing.T) {
+	buf := metricFamiliesToProtobuf(t, []string{`
+name: "no_quantile_summary"
+help: "A summary with no quantile entries."
+type: SUMMARY
+metric: <
+  summary: <
+    sample_count: 10
+    sample_sum: 1.5
+  >
+>
+`})
+
+	p := NewProtobufParser(buf.Bytes(), false, false, false, false, labels.NewSymbolTable())
+	require.NotPanics(t, func() {
+		for {
+			_, err := p.Next()
+			if errors.Is(err, io.EOF) || err != nil {
+				break
+			}
+		}
+	})
 }
 
 func generateString(r *rand.Rand, firstRunes, restRunes []rune) string {
