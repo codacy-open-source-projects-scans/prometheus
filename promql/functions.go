@@ -242,7 +242,7 @@ func extrapolatedRate(vals Matrix, args parser.Expressions, enh *EvalNodeHelper,
 		}
 		for i, currPoint := range samples.Floats[1:] {
 			prevPoint := samples.Floats[i]
-			if currPoint.F < prevPoint.F || i+1 < len(startTimestamps) && isStartTimestampReset(startTimestamps[i], prevPoint.T, startTimestamps[i+1], currPoint.T) {
+			if currPoint.F < prevPoint.F || (i+1 < len(startTimestamps) && isStartTimestampReset(startTimestamps[i], prevPoint.T, startTimestamps[i+1], currPoint.T)) {
 				resultFloat += prevPoint.F
 			}
 		}
@@ -447,6 +447,12 @@ func isStartTimestampReset(prevStartTimestamp, prevTimestamp, currStartTimestamp
 	// This should be treated as a reset for deltas, but it is not a reset for cumulative series
 	// with unknown start timestamp. Thus we have to check whether the start timestamp
 	// of the previous datapoint is known.
+	//
+	// A previous start timestamp greater than the previous sample timestamp is invalid; treat it
+	// as unknown to avoid a spurious reset.
+	if prevStartTimestamp > prevTimestamp {
+		return false
+	}
 	return prevStartTimestamp != 0
 }
 
