@@ -518,7 +518,7 @@ func (db *DB) loadWAL(r *wlog.Reader, duplicateRefToValidRef map[chunks.HeadSeri
 					return
 				}
 				decoded <- samples
-			case record.HistogramSamples, record.CustomBucketsHistogramSamples:
+			case record.HistogramSamples, record.CustomBucketsHistogramSamples, record.HistogramSamplesV2:
 				histograms := db.walReplayHistogramsPool.Get()[:0]
 				histograms, err = dec.HistogramSamples(rec, histograms)
 				if err != nil {
@@ -530,7 +530,7 @@ func (db *DB) loadWAL(r *wlog.Reader, duplicateRefToValidRef map[chunks.HeadSeri
 					return
 				}
 				decoded <- histograms
-			case record.FloatHistogramSamples, record.CustomBucketsFloatHistogramSamples:
+			case record.FloatHistogramSamples, record.CustomBucketsFloatHistogramSamples, record.FloatHistogramSamplesV2:
 				floatHistograms := db.walReplayFloatHistogramsPool.Get()[:0]
 				floatHistograms, err = dec.FloatHistogramSamples(rec, floatHistograms)
 				if err != nil {
@@ -548,11 +548,8 @@ func (db *DB) loadWAL(r *wlog.Reader, duplicateRefToValidRef map[chunks.HeadSeri
 				// stripeSeries.exemplars in the next block by using setLatestExemplar.
 				continue
 			default:
-				errCh <- &wlog.CorruptionErr{
-					Err:     fmt.Errorf("invalid record type %v", dec.Type(rec)),
-					Segment: r.Segment(),
-					Offset:  r.Offset(),
-				}
+				// Unknown records are ignored, enabling users to roll back.
+				// If this behaviour changes, update both server and agent replay.
 			}
 		}
 	}()
@@ -702,18 +699,7 @@ Loop:
 			// samples and may be deleted from the WAL. Their most recent append
 			// timestamp is compared to ts, and if that timestamp is older then ts,
 			// they are considered inactive and may be deleted.
-			//
-			// Subtracting a duration from ts will add a buffer for when series are
-			// considered inactive and safe for deletion.
-			ts := max(db.rs.LowestSentTimestamp()-db.opts.MinWALTime, 0)
-
-			// Network issues can prevent the result of getRemoteWriteTimestamp from
-			// changing. We don't want data in the WAL to grow forever, so we set a cap
-			// on the maximum age data can be. If our ts is older than this cutoff point,
-			// we'll shift it forward to start deleting very stale data.
-			if maxTS := timestamp.FromTime(time.Now()) - db.opts.MaxWALTime; ts < maxTS {
-				ts = maxTS
-			}
+			ts := walTruncationTime(db.opts, db.rs.LowestSentTimestamp(), timestamp.FromTime(time.Now()))
 
 			db.logger.Debug("truncating the WAL", "ts", ts)
 			if err := db.truncate(ts); err != nil {
@@ -721,6 +707,21 @@ Loop:
 			}
 		}
 	}
+}
+
+// walTruncationTime returns the timestamp before which inactive series may be
+// truncated from the WAL, keeping between MinWALTime and MaxWALTime of data.
+func walTruncationTime(opts *Options, lowestSentTs, nowTS int64) int64 {
+	// Keep MinWALTime of data behind what remote write has sent. Floor at 0
+	// since lowestSentTs is 0 until remote write sends something.
+	ts := max(lowestSentTs-opts.MinWALTime, 0)
+
+	// Keep at most MaxWALTime of data, even if remote write is stalled.
+	ts = max(ts, nowTS-opts.MaxWALTime)
+
+	// Keep at least MinWALTime of data, even if lowestSentTs is in the future.
+	// Floor at 0 so the cutoff is never negative.
+	return min(ts, max(nowTS-opts.MinWALTime, 0))
 }
 
 // keepSeriesInWALCheckpointFn returns a function that is used to determine whether a series record should be kept in the checkpoint.
@@ -777,13 +778,16 @@ func (db *DB) truncate(mint int64) error {
 	if db.opts.CheckpointFromInMemorySeries {
 		err = Checkpoint(db.logger, db.wal, last, db.opts.CheckpointBatchSize, db.series.allSeries(), deletedSeriesIter(db.deleted, last))
 	} else {
-		_, err = wlog.Checkpoint(db.logger, db.wal, first, last, db.keepSeriesInWALCheckpointFn(last), mint, db.opts.EnableSTStorage)
+		// writeMinValidTime is false: the agent has no use for ReadMinValidTime, and unlike
+		// Head's own replay, the agent's replay treats any unrecognized record type as
+		// corruption. Writing that record here would risk data loss on a downgrade to an
+		// older agent that doesn't know about it.
+		_, err = wlog.Checkpoint(db.logger, db.wal, first, last, db.keepSeriesInWALCheckpointFn(last), mint, db.opts.EnableSTStorage, false)
 	}
 
 	if err != nil {
 		db.metrics.checkpointCreationFail.Inc()
-		var cerr *wlog.CorruptionErr
-		if errors.As(err, &cerr) {
+		if _, ok := errors.AsType[*wlog.CorruptionErr](err); ok {
 			db.metrics.walCorruptionsTotal.Inc()
 		}
 		return fmt.Errorf("create checkpoint: %w", err)
@@ -971,7 +975,7 @@ func (a *appenderBase) getOrCreate(ref chunks.HeadSeriesRef, l labels.Labels) (s
 	}
 
 	// Known limitation: unlike the TSDB head, agent memSeries has no
-	// pendingCommit flag. Between this point and the first sample write that
+	// pending-commit protection. Between this point and the first sample write that
 	// updates series.lastTs, GC may remove the series (lastTs == math.MinInt64
 	// satisfies mint > lastTs). The WAL record appended below would then
 	// reference a ref with no corresponding in-memory series.
@@ -1226,7 +1230,7 @@ func (a *appenderBase) log() error {
 	encoder := record.Encoder{EnableSTStorage: a.opts.EnableSTStorage}
 	buf := a.bufPool.Get().([]byte)
 	defer func() {
-		a.bufPool.Put(buf) //nolint:staticcheck
+		a.bufPool.Put(buf[:0]) //nolint:staticcheck
 	}()
 
 	if len(a.pendingSeries) > 0 {
@@ -1344,7 +1348,7 @@ func (a *appenderBase) logSeries() error {
 	if len(a.pendingSeries) > 0 {
 		buf := a.bufPool.Get().([]byte)
 		defer func() {
-			a.bufPool.Put(buf) //nolint:staticcheck
+			a.bufPool.Put(buf[:0]) //nolint:staticcheck
 		}()
 
 		encoder := record.Encoder{EnableSTStorage: a.opts.EnableSTStorage}

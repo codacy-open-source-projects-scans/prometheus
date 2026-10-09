@@ -118,6 +118,11 @@ func BucketQuantile(q float64, buckets Buckets) (
 		quantile = math.Inf(+1)
 		return quantile, forcedMonotonic, fixedPrecision, minBucket, maxBucket, maxDiff
 	}
+	if len(buckets) == 0 {
+		quantile = math.NaN()
+		return quantile, forcedMonotonic, fixedPrecision, minBucket, maxBucket, maxDiff
+	}
+
 	slices.SortFunc(buckets, func(a, b Bucket) int {
 		// We don't expect the bucket boundary to be a NaN.
 		if a.UpperBound < b.UpperBound {
@@ -216,6 +221,9 @@ func BucketQuantile(q float64, buckets Buckets) (
 //
 // HistogramQuantile is for calculating the histogram_quantile() of native
 // histograms. See also: BucketQuantile for classic histograms.
+//
+// The returned annotations are all about the histogram h, so pos must be the
+// position of the expression that h was derived from, not the position of q.
 //
 // HistogramQuantile is exported as it may be used by other PromQL engine
 // implementations.
@@ -389,6 +397,9 @@ func HistogramQuantile(q float64, h *histogram.FloatHistogram, metricName string
 // thus histogram_fraction(-Inf, +Inf, v) might be less than 1.0. The function
 // returns an info level annotation in this case.
 //
+// The returned annotation is about the histogram h, so pos must be the position
+// of the expression that h was derived from, not the position of lower or upper.
+//
 // HistogramFraction is exported as it may be used by other PromQL engine
 // implementations.
 func HistogramFraction(lower, upper float64, h *histogram.FloatHistogram, metricName string, pos posrange.PositionRange) (float64, annotations.Annotations) {
@@ -426,28 +437,24 @@ func HistogramFraction(lower, upper float64, h *histogram.FloatHistogram, metric
 			if b.Lower == math.Inf(-1) {
 				return b.Count
 			}
-			return rank + b.Count*(v-b.Lower)/(b.Upper-b.Lower)
+			return rank + b.Count*b.FractionBelow(v, true)
 		}
 
-		// interpolateExponentially is using the same exponential
-		// interpolation method as above for histogramQuantile. This
-		// method is a better fit for exponential bucketing.
+		// interpolateExponentially interpolates on a logarithmic scale, which
+		// is a better fit for exponential bucketing. See Bucket.FractionBelow.
 		interpolateExponentially := func(v float64) float64 {
-			var (
-				logLower = math.Log2(math.Abs(b.Lower))
-				logUpper = math.Log2(math.Abs(b.Upper))
-				logV     = math.Log2(math.Abs(v))
-				fraction float64
-			)
-			if v > 0 {
-				fraction = (logV - logLower) / (logUpper - logLower)
-			} else {
-				fraction = 1 - ((logV - logUpper) / (logLower - logUpper))
-			}
-			return rank + b.Count*fraction
+			return rank + b.Count*b.FractionBelow(v, false)
 		}
 
-		if b.Lower <= 0 && b.Upper >= 0 {
+		if h.UsesCustomBuckets() {
+			// Custom buckets have no zero bucket. Only the first bucket has a
+			// lower bound of -Inf, and 0 is its lower bound if its upper bound
+			// is positive, as done for classic histograms and in
+			// HistogramQuantile above.
+			if b.Lower == math.Inf(-1) && b.Upper > 0 {
+				b.Lower = 0
+			}
+		} else if b.Lower <= 0 && b.Upper >= 0 {
 			zeroBucket = true
 			switch {
 			case len(h.NegativeBuckets) == 0 && len(h.PositiveBuckets) > 0:
@@ -534,6 +541,9 @@ func BucketFraction(lower, upper float64, buckets Buckets) float64 {
 		}
 		return 0
 	})
+	if len(buckets) == 0 {
+		return math.NaN()
+	}
 	if !math.IsInf(buckets[len(buckets)-1].UpperBound, +1) {
 		return math.NaN()
 	}

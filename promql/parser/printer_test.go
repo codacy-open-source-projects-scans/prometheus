@@ -15,6 +15,7 @@ package parser
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -23,8 +24,7 @@ import (
 
 func TestExprString(t *testing.T) {
 	optsParser := NewParser(Options{
-		EnableExtendedRangeSelectors: true,
-		EnableBinopFillModifiers:     true,
+		EnableBinopFillModifiers: true,
 	})
 	// A list of valid expressions that are expected to be
 	// returned as out when calling String(). If out is empty the output
@@ -128,6 +128,10 @@ func TestExprString(t *testing.T) {
 		{
 			in:  `a + fill_left(-23) fill_right(42) b`,
 			out: `a + fill_left (-23) fill_right (42) b`,
+		},
+		{
+			in:  `a + fill_left(5) fill_right(5) b`,
+			out: `a + fill (5) b`,
 		},
 		{
 			in:  `a + on(b) group_left fill(-23) c`,
@@ -265,26 +269,41 @@ func TestExprString(t *testing.T) {
 			in: "foo offset -(step())",
 		},
 		{
-			in:  "foo offset +(5*2)",
-			out: "foo offset (5 * 2)",
+			in:  "foo offset +(5)",
+			out: "foo offset (5)",
 		},
 		{
-			in:  "foo offset +min(10s, 20s)",
-			out: "foo offset min(10s, 20s)",
+			in: "foo offset -(5)",
 		},
 		{
-			in: "foo offset -min(10s, 20s)",
+			in: "foo offset (5)",
 		},
 		{
-			in:  "foo offset -min(10s, +max(step() ^ 2, 2))",
-			out: "foo offset -min(10s, max(step() ^ 2, 2))",
+			in: "foo offset (5m)",
 		},
 		{
-			in:  "foo[200-min(-step()^+step(),1)]",
-			out: "foo[200 - min(-step() ^ step(), 1)]",
+			in: "foo[(5s)]",
 		},
 		{
-			in: "foo[200 - min(step() + 10s, -max(step() ^ 2, 3))]",
+			in: "foo[(5m):(1m)]",
+		},
+		{
+			in:  "foo offset +min_of(10s, 20s)",
+			out: "foo offset min_of(10s, 20s)",
+		},
+		{
+			in: "foo offset -min_of(10s, 20s)",
+		},
+		{
+			in:  "foo offset -min_of(10s, +max_of(step() ^ 2, 2))",
+			out: "foo offset -min_of(10s, max_of(step() ^ 2, 2))",
+		},
+		{
+			in:  "foo[200-min_of(-step()^+step(),1)]",
+			out: "foo[200 - min_of(-step() ^ step(), 1)]",
+		},
+		{
+			in: "foo[200 - min_of(step() + 10s, -max_of(step() ^ 2, 3))]",
 		},
 		{
 			in: "foo[range()]",
@@ -299,7 +318,7 @@ func TestExprString(t *testing.T) {
 			in: "foo offset -range()",
 		},
 		{
-			in: "foo[max(range(), 5s)]",
+			in: "foo[max_of(range(), 5s)]",
 		},
 		{
 			in: `predict_linear(foo[1h], 3000)`,
@@ -433,6 +452,47 @@ func TestVectorSelector_String(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			require.Equal(t, tc.expected, tc.vs.String())
+		})
+	}
+}
+
+func TestMatrixSelector_String(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		ms            MatrixSelector
+		expected      string
+		expectedShort string
+	}{
+		{
+			name: "vector selector",
+			ms: MatrixSelector{
+				VectorSelector: &VectorSelector{Name: "foobar"},
+				Range:          5 * time.Minute,
+			},
+			expected:      `foobar[5m]`,
+			expectedShort: `[5m]`,
+		},
+		{
+			// A failed parse can leave a non-vector expression as the operand.
+			name: "non-vector operand",
+			ms: MatrixSelector{
+				VectorSelector: &NumberLiteral{Val: 1},
+				Range:          5 * time.Minute,
+			},
+			expected:      `1[5m]`,
+			expectedShort: `[5m]`,
+		},
+		{
+			// A hand-built node may have no operand at all.
+			name:          "no operand",
+			ms:            MatrixSelector{Range: 5 * time.Minute},
+			expected:      `[5m]`,
+			expectedShort: `[5m]`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.expected, tc.ms.String())
+			require.Equal(t, tc.expectedShort, tc.ms.ShortString())
 		})
 	}
 }
